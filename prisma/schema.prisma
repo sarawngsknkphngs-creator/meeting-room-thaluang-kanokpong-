@@ -1,0 +1,176 @@
+// Prisma Schema for Meeting Room Booking System
+// Database: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+enum RoomStatus {
+  AVAILABLE
+  MAINTENANCE
+  INACTIVE
+}
+
+enum BookingStatus {
+  PENDING_CHECK     // ขั้นที่ 1: ผู้ขอใช้ยื่นคำขอ
+  CHECKED           // ขั้นที่ 2: เจ้าหน้าที่ศูนย์ดิจิทัลฯ ตรวจสอบแล้ว (นายวัชรพงศ์ โสภา)
+  ENDORSED          // ขั้นที่ 3: หัวหน้างานศูนย์ดิจิทัลฯ รับรองแล้ว (นายเอกราช เขียวทอง)
+  APPROVED          // ขั้นที่ 4: รอง ผอ. อนุมัติแล้ว (นายชาตรี เริงชัยภูมิ)
+  REJECTED          // ไม่อนุมัติ
+  CONFIRMED         // ยืนยันการใช้งาน
+  CANCELLED         // ยกเลิก
+  COMPLETED         // ใช้งานเสร็จสิ้น
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  REMINDER_15MIN
+  ROOM_MAINTENANCE
+  SYSTEM
+}
+
+model User {
+  id           String         @id @default(uuid())
+  email        String         @unique
+  name         String
+  passwordHash String
+  role         Role           @default(EMPLOYEE)
+  department   String?
+  phoneNumber  String?
+  avatarUrl    String?
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  bookings      Booking[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Room {
+  id          String        @id @default(uuid())
+  name        String
+  roomCode    String        @unique
+  capacity    Int
+  floor       String?
+  location    String?
+  description String?
+  imageUrl    String?
+  status      RoomStatus    @default(AVAILABLE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  amenities RoomAmenity[]
+  bookings  Booking[]
+
+  @@map("rooms")
+}
+
+model Amenity {
+  id          String        @id @default(uuid())
+  name        String        @unique
+  icon        String?       // Lucide icon name, e.g. "projector", "wifi", "video"
+  description String?
+  rooms       RoomAmenity[]
+
+  @@map("amenities")
+}
+
+model RoomAmenity {
+  id        String  @id @default(uuid())
+  roomId    String
+  amenityId String
+  quantity  Int     @default(1)
+
+  room    Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  amenity Amenity @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, amenityId])
+  @@map("room_amenities")
+}
+
+model Booking {
+  id              String        @id @default(uuid())
+  bookingCode     String        @unique // e.g. "BK-20261028-001"
+  title           String
+  description     String?
+  roomId          String
+  userId          String
+  startTime       DateTime
+  endTime         DateTime
+  status          BookingStatus @default(CONFIRMED)
+  attendeeCount   Int           @default(1)
+  rejectionReason String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  room          Room              @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attendees     BookingAttendee[]
+  notifications Notification[]
+
+  // Indexes for query performance
+  @@index([roomId, startTime, endTime])
+  @@index([userId, startTime])
+  @@index([status])
+  @@map("bookings")
+}
+
+model BookingAttendee {
+  id         String   @id @default(uuid())
+  bookingId  String
+  email      String
+  name       String?
+  isInternal Boolean  @default(true)
+  userId     String?
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@map("booking_attendees")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  bookingId String?
+  title     String
+  message   String
+  type      NotificationType
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String   // e.g. "CREATE_BOOKING", "CANCEL_BOOKING", "UPDATE_ROOM"
+  entityType String   // e.g. "Booking", "Room", "User"
+  entityId   String
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
